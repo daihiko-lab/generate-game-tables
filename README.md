@@ -27,11 +27,11 @@
 Rscript generate_game_tables.R
 ```
 
-PNGは既定で `images/matrix/demo/` に保存されます (`define_game()` の `output_dir` で変更できます)。
+PNGは既定で `output/` に保存されます (`GAME_OUTPUT_DIR` で変更できます)。生成物のPNGは `.gitignore` 対象で、`output/.gitkeep` のみリポジトリに含めます。
 
 ## カスタマイズ
 
-スクリプト内の `define_game()` で、戦略集合・利得行列・プレイヤー表示ラベル・フォントなどを編集してください。処理を実行したくない場合は、`define_game()` 内の `enabled <- TRUE` を `FALSE` に変更してください。
+`generate_game_tables.R` 先頭の **GAME SETTINGS** で、戦略集合・利得行列・プレイヤー表示ラベル・出力先などを編集してください。処理を実行したくない場合は `GAME_ENABLED <- FALSE` にしてください。
 
 ## ライセンス
 

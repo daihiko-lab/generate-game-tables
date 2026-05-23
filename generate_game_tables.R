@@ -2,7 +2,32 @@
 
 # Game Theory Table Generator using R flextable + webshot2
 # Usage: Rscript generate_game_tables.R
-# To customize output files, edit default values in define_game() function
+# To customize the game and output, edit GAME SETTINGS below.
+
+# -----------------------------------------------------------------------------
+# GAME SETTINGS (edit here)
+# -----------------------------------------------------------------------------
+GAME_ENABLED <- TRUE
+GAME_FILE_PREFIX <- "3strategies"
+GAME_CALCULATE_NASH <- TRUE
+GAME_SAVE_IMAGES <- TRUE
+# top = column player (2), left = row player (1)
+GAME_PLAYER_LABELS <- list(
+  left = "プレイヤー1",
+  top = "プレイヤー2"
+)
+GAME_STRATEGIES <- c("40％を要求", "50％を要求", "60％を要求")
+# Payoff matrix (row-major): rows = left / player 1, cols = top / player 2;
+# each cell is c(row payoff, col payoff) = c(player 1, player 2)
+GAME_PAYOFF_MATRIX <- list(
+  c(40, 40), c(40, 50), c(40, 60),
+  c(50, 40), c(50, 50), c(0, 0),
+  c(60, 40), c(0, 0), c(0, 0)
+)
+# NULL = write to output/ next to this script
+GAME_OUTPUT_DIR <- NULL
+# NULL = Times New Roman + system Japanese font
+GAME_FONT_FAMILIES <- NULL
 
 # Check and install required packages
 #' Check if a package is installed and install if necessary
@@ -191,65 +216,63 @@ get_game_table_font <- function() {
   "Noto Serif CJK JP"
 }
 
-#' Resolve repository-root images directory from this script's location
+#' Resolve repository-root output directory from this script's location
 #'
 #' Repo root is the directory containing this script (works when run with
-#' Rscript --vanilla generate_game_tables.R from the checkout root).
-get_repo_images_dir <- function(...) {
+#' Rscript generate_game_tables.R from any working directory).
+get_repo_output_dir <- function(...) {
   script_path <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
-  repo_root <- normalizePath(dirname(script_path), winslash = "/", mustWork = FALSE)
-  file.path(repo_root, "images", ...)
+  repo_root <- normalizePath(dirname(script_path[1]), winslash = "/", mustWork = FALSE)
+  file.path(repo_root, "output", ...)
 }
 
 # Game definition
 #' Define game parameters
 #'
-#' @param output_dir Output directory
+#' @param output_dir Output directory (NULL uses GAME_OUTPUT_DIR or repo output/)
 #' @param file_prefix File name prefix
 #' @param calculate_nash Whether to calculate Nash equilibrium
 #' @param player_labels Player labels for top and left positions
 #' @param font_families Latin and Japanese font families
+#' @param strategies Strategy names for both players
+#' @param payoff_matrix Payoff matrix in list format
+#' @param enabled Whether this game is active
 #' @return Game definition list
-define_game <- function(output_dir = get_repo_images_dir("matrix", "demo"),
-                        file_prefix = "3strategies",
-                        calculate_nash = TRUE,
-                        player_labels = list(
-                          top = "Bタイプの成員",
-                          left = "Aタイプの成員"
-                        ),
-                        font_families = get_game_table_fonts()) {
-  enabled <- TRUE
+define_game <- function(output_dir = NULL,
+                        file_prefix = GAME_FILE_PREFIX,
+                        calculate_nash = GAME_CALCULATE_NASH,
+                        player_labels = GAME_PLAYER_LABELS,
+                        font_families = GAME_FONT_FAMILIES,
+                        strategies = GAME_STRATEGIES,
+                        payoff_matrix = GAME_PAYOFF_MATRIX,
+                        enabled = GAME_ENABLED) {
+  if (is.null(output_dir)) {
+    output_dir <- if (is.null(GAME_OUTPUT_DIR)) {
+      get_repo_output_dir()
+    } else {
+      GAME_OUTPUT_DIR
+    }
+  }
   font_families <- normalize_font_families(font_families)
 
   game_definition <- list(
     enabled = enabled,
-    strategies = c("40％を要求", "50％を要求", "60％を要求"),
+    strategies = strategies,
     output_dir = output_dir,
     file_prefix = file_prefix,
     calculate_nash = calculate_nash,
     player_labels = player_labels,
-    font_families = font_families
+    font_families = font_families,
+    payoff_matrix = if (enabled) payoff_matrix else list()
   )
-
-  if (enabled) {
-    # Payoff matrix (row-major): rows = left player (A), cols = top player (B);
-    # each cell is c(row payoff, col payoff) = c(A, B)
-    game_definition$payoff_matrix <- list(
-      c(40, 40), c(40, 50), c(40, 60),
-      c(50, 40), c(50, 50), c(0, 0),
-      c(60, 40), c(0, 0), c(0, 0)
-    )
-  } else {
-    game_definition$payoff_matrix <- list()
-  }
   return(game_definition)
 }
 
 # Game analysis functions
 #' Create game data structure from payoff matrix
 #' @param payoffs Payoff matrix in list format (e.g., list(c(4,4)...))
-#' @param strategy_names_a Strategy names for Player A
-#' @param strategy_names_b Strategy names for Player B (defaults to Player A)
+#' @param strategy_names_a Strategy names for row / left player (1)
+#' @param strategy_names_b Strategy names for column / top player (2)
 #' @param epsilon Tolerance for floating-point comparisons
 create_game_data <- function(payoffs, strategy_names_a,
                              strategy_names_b = NULL,
@@ -282,7 +305,7 @@ calculate_nash_equilibrium <- function(game_data) {
     current_idx <- (strategy_a - 1) * game_data$num_strategies_b + strategy_b
     current_payoff <- game_data$payoffs[[current_idx]]
 
-    # Check best response for Player A
+    # Check best response for row / left player (1)
     for (i in 1:game_data$num_strategies_a) {
       if (i != strategy_a) {
         other_idx <- (i - 1) * game_data$num_strategies_b + strategy_b
@@ -293,7 +316,7 @@ calculate_nash_equilibrium <- function(game_data) {
       }
     }
 
-    # Check best response for Player B
+    # Check best response for column / top player (2)
     for (j in 1:game_data$num_strategies_b) {
       if (j != strategy_b) {
         other_idx <- (strategy_a - 1) * game_data$num_strategies_b + j
@@ -425,24 +448,17 @@ create_game_table <- function(display_data, nash_equilibria,
 #' @param zoom Zoom factor for webshot2
 #' @param resolution Image resolution
 #' @param add_player_labels Whether to add player labels
-#' @param player_labels Player label text for top and left positions
+#' @param player_labels Player label text for top and left positions (from define_game() or analyze_game())
 #' @param label_font_families Latin and Japanese font families for labels
 save_game_table <- function(ft, output_path, zoom = 3,
                             resolution = 2000,
                             add_player_labels = TRUE,
-                            player_labels = list(
-                              top = "Aタイプエージェント",
-                              left = "Bタイプエージェント"
-                            ),
+                            player_labels,
                             label_font_families = get_game_table_fonts()) {
   # Layout constants (scale margins with label size to avoid clipping)
   label_font_size <- 80
   margin_top <- max(360, round(label_font_size * 6.5))
   margin_left <- max(440, round(label_font_size * 5.5))
-  player_labels <- modifyList(list(
-    top = "Aタイプエージェント",
-    left = "Bタイプエージェント"
-  ), player_labels)
   label_font_families <- normalize_font_families(label_font_families)
   png_type <- if (isTRUE(capabilities("cairo"))) "cairo" else "default"
 
@@ -479,24 +495,24 @@ save_game_table <- function(ft, output_path, zoom = 3,
           height = new_height, res = 300, type = png_type)
       grid.newpage()
 
-      # Place column-player label (top center)
+      # Column / top player (2)
       payoff_area_center <- strategy_col_ratio +
         (1 - strategy_col_ratio) / 2
-      player2_x_npc <- (margin_left +
-                          img_width * payoff_area_center) / new_width
-      player2_y_npc <- (img_height + margin_top * 0.32) / new_height
+      col_player_x_npc <- (margin_left +
+                             img_width * payoff_area_center) / new_width
+      col_player_y_npc <- (img_height + margin_top * 0.32) / new_height
       draw_mixed_label(player_labels$top,
-                       x_npc = player2_x_npc,
-                       y_npc = player2_y_npc,
+                       x_npc = col_player_x_npc,
+                       y_npc = col_player_y_npc,
                        fontsize = label_font_size,
                        font_families = label_font_families)
 
-      # Place row-player label: center in left margin, align with full table
-      player1_x_npc <- (margin_left * 0.5) / new_width
-      player1_y_npc <- (img_height / 2) / new_height
+      # Row / left player (1)
+      row_player_x_npc <- (margin_left * 0.5) / new_width
+      row_player_y_npc <- (img_height / 2) / new_height
       draw_mixed_label(player_labels$left,
-                       x_npc = player1_x_npc,
-                       y_npc = player1_y_npc,
+                       x_npc = row_player_x_npc,
+                       y_npc = row_player_y_npc,
                        rot = 90,
                        fontsize = label_font_size,
                        font_families = label_font_families)
@@ -535,7 +551,7 @@ save_game_table <- function(ft, output_path, zoom = 3,
 #' @param player_labels Player labels for top and left positions
 #' @param font_families Latin and Japanese font families
 analyze_game <- function(game_def,
-                         output_dir = "_webshot/matrix/default",
+                         output_dir = get_repo_output_dir(),
                          file_prefix = "game_matrix",
                          save_images = TRUE,
                          calculate_nash = TRUE,
@@ -638,8 +654,7 @@ analyze_game <- function(game_def,
 # Main execution
 cat("Game Theory Table Generator\n")
 
-# Execution options
-save_images <- TRUE
+save_images <- GAME_SAVE_IMAGES
 
 # Load game definition
 mini_nash_game <- define_game()
@@ -708,5 +723,5 @@ if (mini_nash_game$enabled) {
 } else {
   cat("\nGame processing skipped\n")
   cat("This game is disabled\n")
-  cat("To enable, set enabled = TRUE in define_game()\n")
+  cat("To enable, set GAME_ENABLED <- TRUE at the top of this file\n")
 }
