@@ -1,0 +1,15 @@
+# History / session
+.Rhistory
+.RData
+.Ruserdata
+.Renviron
+
+# RStudio / proj
+*.Rproj
+.Rproj.user
+
+# OS
+.DS_Store
+
+# 生成PNG (必要ならコメントアウトしてコミット)
+images/**/*.png
