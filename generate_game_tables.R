@@ -460,6 +460,7 @@ create_display_dataframe <- function(game_data) {
 
 MAX_CELL_ANNOTATIONS <- 99L
 ANNOTATION_MARK_SYMBOL <- "\u203b"  # ※
+ANNOTATION_TEXT_COLOR <- "black"
 
 #' In-cell / footnote mark: ※ when alone, ※1 ※2 … when multiple
 annotation_mark_label <- function(number, show_number = TRUE) {
@@ -681,7 +682,7 @@ draw_cell_marks <- function(cell_marks, game_data, img_width, img_height,
       y_npc = y_npc,
       fontsize = mark_fontsize,
       font_families = font_families,
-      text_color = "#333333",
+      text_color = ANNOTATION_TEXT_COLOR,
       hjust = 1,
       vjust = 1
     )
@@ -732,7 +733,7 @@ draw_annotation_footnotes <- function(footnotes, img_width, img_height,
       y_npc = y_npc,
       fontsize = footnote_fontsize,
       font_families = font_families,
-      text_color = "#333333",
+      text_color = ANNOTATION_TEXT_COLOR,
       hjust = 0
     )
   }
