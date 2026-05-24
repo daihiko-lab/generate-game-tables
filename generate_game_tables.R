@@ -38,7 +38,7 @@ GAME_CELL_ANNOTATIONS_ENABLED <- TRUE
 # with ※n starting at the same column (aligned to the longest line).
 GAME_CELL_ANNOTATIONS <- list(
   list(cells = list(c(2, 2)), text = "無駄なく、平等に分割"),
-  list(cells = list(c(2, 3), c(3, 2), c(3, 3)), text = "交渉決裂・分割失敗")
+  list(cells = list(c(3, 1), c(1, 3)), text = "無駄はないが、不平等な分割")
   # list(row = 2, col = 3, text = "交渉失敗"),
   # list(row = 1, col = 1, text = "別の解説")
 )
