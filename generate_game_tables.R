@@ -13,10 +13,10 @@ GAME_CALCULATE_NASH <- TRUE
 GAME_SAVE_IMAGES <- TRUE
 # top = column player (2), left = row player (1)
 GAME_PLAYER_LABELS <- list(
-  left = "個人1の要求",
-  top = "個人2の要求"
+  left = "個人1",
+  top = "個人2"
 )
-GAME_STRATEGIES <- c("40%", "50%", "60%")
+GAME_STRATEGIES <- c("40%を要求", "50%を要求", "60%を要求")
 # Payoff matrix (row-major): rows = left / player 1, cols = top / player 2;
 # each cell is c(row payoff, col payoff) = c(player 1, player 2)
 GAME_PAYOFF_MATRIX <- list(
@@ -37,6 +37,7 @@ GAME_CELL_ANNOTATIONS_ENABLED <- TRUE
 # Different text → new line under the table (e.g. "※ 交渉失敗" or "※1 …"), right-aligned
 # with ※n starting at the same column (aligned to the longest line).
 GAME_CELL_ANNOTATIONS <- list(
+  list(cells = list(c(2, 2)), text = "無駄なく、平等に分割"),
   list(cells = list(c(2, 3), c(3, 2), c(3, 3)), text = "交渉決裂・分割失敗")
   # list(row = 2, col = 3, text = "交渉失敗"),
   # list(row = 1, col = 1, text = "別の解説")
@@ -613,6 +614,37 @@ image_y_top_to_npc <- function(py, img_height, margin_bottom, new_height) {
   (margin_bottom + img_height - py) / new_height
 }
 
+#' Footnote font size (points) from table image width
+footnote_fontsize_for_image <- function(img_width) {
+  max(42, min(56, round(img_width * 300 / 1200)))
+}
+
+#' Line height in image pixels for footnote text at res dpi
+footnote_line_height_px <- function(fontsize_pt, res = 300, leading = 1.3) {
+  fontsize_pt * res / 72 * leading
+}
+
+#' Gap between table bottom and first footnote line (pixels)
+footnote_gap_after_table_px <- function(fontsize_pt, res = 300) {
+  round(fontsize_pt * res / 72 * 0.12)
+}
+
+#' Total height of footnote block below the table (pixels)
+footnote_block_height_px <- function(footnote_count, fontsize_pt, res = 300) {
+  line_px <- footnote_line_height_px(fontsize_pt, res = res)
+  gap_px <- footnote_gap_after_table_px(fontsize_pt, res = res)
+  gap_px + footnote_count * line_px + round(line_px * 0.12)
+}
+
+#' Bottom margin pixels for footnote block below the table image
+footnote_margin_bottom_px <- function(footnote_count, img_width, res = 300) {
+  if (footnote_count < 1) {
+    return(0)
+  }
+  fs <- footnote_fontsize_for_image(img_width)
+  footnote_block_height_px(footnote_count, fs, res = res)
+}
+
 #' Draw mark symbols on annotated payoff cells
 draw_cell_marks <- function(cell_marks, game_data, img_width, img_height,
                             margin_left, margin_bottom, new_width, new_height,
@@ -670,9 +702,10 @@ draw_annotation_footnotes <- function(footnotes, img_width, img_height,
 
   font_families <- normalize_font_families(font_families)
   if (is.null(footnote_fontsize)) {
-    footnote_fontsize <- max(42, min(56, round(img_width * 300 / 1200)))
+    footnote_fontsize <- footnote_fontsize_for_image(img_width)
   }
-  line_spacing <- footnote_fontsize * 1.5
+  line_spacing_px <- footnote_line_height_px(footnote_fontsize)
+  gap_after_table_px <- footnote_gap_after_table_px(footnote_fontsize)
   table_bottom_py <- img_height
   x_right <- (margin_left + img_width * 0.98) / new_width
 
@@ -691,7 +724,7 @@ draw_annotation_footnotes <- function(footnotes, img_width, img_height,
   x_start <- x_right - max(line_widths)
 
   for (idx in seq_along(footnotes)) {
-    py <- table_bottom_py + 36 + (idx - 0.5) * line_spacing
+    py <- table_bottom_py + gap_after_table_px + (idx - 0.5) * line_spacing_px
     y_npc <- image_y_top_to_npc(py, img_height, margin_bottom, new_height)
     draw_mixed_label(
       footnote_lines[idx],
@@ -811,11 +844,6 @@ save_game_table <- function(ft, output_path, zoom = 3,
   has_annotations <- length(annotation_data$cell_marks) > 0 ||
     length(annotation_data$footnotes) > 0
   footnote_count <- length(annotation_data$footnotes)
-  margin_bottom <- if (footnote_count > 0) {
-    max(200, round(footnote_count * 88 + 120))
-  } else {
-    0
-  }
 
   # Table structure ratios
   strategy_col_ratio <- 0.25
@@ -840,6 +868,13 @@ save_game_table <- function(ft, output_path, zoom = 3,
       img <- readPNG(temp_path)
       img_height <- nrow(img)
       img_width <- ncol(img)
+
+      margin_bottom <- footnote_margin_bottom_px(footnote_count, img_width)
+      footnote_fontsize <- if (footnote_count > 0) {
+        footnote_fontsize_for_image(img_width)
+      } else {
+        NULL
+      }
 
       # New image size with margins
       new_width <- img_width + margin_left
@@ -910,7 +945,8 @@ save_game_table <- function(ft, output_path, zoom = 3,
           margin_bottom = margin_bottom,
           new_width = new_width,
           new_height = new_height,
-          font_families = label_font_families
+          font_families = label_font_families,
+          footnote_fontsize = footnote_fontsize
         )
       }
 
