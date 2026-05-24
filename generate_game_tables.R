@@ -13,16 +13,33 @@ GAME_CALCULATE_NASH <- TRUE
 GAME_SAVE_IMAGES <- TRUE
 # top = column player (2), left = row player (1)
 GAME_PLAYER_LABELS <- list(
-  left = "プレイヤー1",
-  top = "プレイヤー2"
+  left = "個人1の要求",
+  top = "個人2の要求"
 )
-GAME_STRATEGIES <- c("40％を要求", "50％を要求", "60％を要求")
+GAME_STRATEGIES <- c("40%", "50%", "60%")
 # Payoff matrix (row-major): rows = left / player 1, cols = top / player 2;
 # each cell is c(row payoff, col payoff) = c(player 1, player 2)
 GAME_PAYOFF_MATRIX <- list(
   c(40, 40), c(40, 50), c(40, 60),
   c(50, 40), c(50, 50), c(0, 0),
   c(60, 40), c(0, 0), c(0, 0)
+)
+# Cell annotations (※ marks + footnotes below the table)
+GAME_CELL_ANNOTATIONS_ENABLED <- TRUE
+# Cell marks + footnotes (ignored when GAME_CELL_ANNOTATIONS_ENABLED is FALSE).
+# One list entry = one footnote line; mark the cell(s) you name explicitly.
+#   text  (required) explanation below the table
+#   row, col  (required unless cells is set) 1-based: row = left player, col = top
+#   cells  (optional) list of c(row, col) to attach the same footnote to several cells
+#   mark  (optional) comment index; auto 1, 2, 3, … if omitted
+# One distinct note → ※ only (no number); two or more → ※1, ※2, …
+# Same text in multiple entries reuses one mark and one footnote line.
+# Different text → new line under the table (e.g. "※ 交渉失敗" or "※1 …"), right-aligned
+# with ※n starting at the same column (aligned to the longest line).
+GAME_CELL_ANNOTATIONS <- list(
+  list(cells = list(c(2, 3), c(3, 2), c(3, 3)), text = "交渉決裂・分割失敗")
+  # list(row = 2, col = 3, text = "交渉失敗"),
+  # list(row = 1, col = 1, text = "別の解説")
 )
 # NULL = write to output/ next to this script
 GAME_OUTPUT_DIR <- NULL
@@ -113,10 +130,47 @@ split_label_text <- function(label) {
   list(latin = latin_text, japanese = japanese_text)
 }
 
+#' Measure rendered width of a mixed label in npc units (current grid viewport)
+measure_mixed_label_width_npc <- function(label, fontsize,
+                                        font_families = get_game_table_fonts()) {
+  font_families <- normalize_font_families(font_families)
+  label_parts <- split_label_text(label)
+
+  if (label_parts$japanese == "") {
+    grob <- textGrob(
+      label,
+      gp = gpar(fontsize = fontsize, fontfamily = font_families$latin)
+    )
+    return(convertWidth(grobWidth(grob), "npc", valueOnly = TRUE))
+  }
+
+  if (label_parts$latin == "") {
+    grob <- textGrob(
+      label,
+      gp = gpar(fontsize = fontsize, fontfamily = font_families$japanese)
+    )
+    return(convertWidth(grobWidth(grob), "npc", valueOnly = TRUE))
+  }
+
+  latin_grob <- textGrob(
+    label_parts$latin,
+    gp = gpar(fontsize = fontsize, fontfamily = font_families$latin)
+  )
+  japanese_grob <- textGrob(
+    label_parts$japanese,
+    gp = gpar(fontsize = fontsize, fontfamily = font_families$japanese)
+  )
+  convertWidth(grobWidth(latin_grob), "npc", valueOnly = TRUE) +
+    convertWidth(grobWidth(japanese_grob), "npc", valueOnly = TRUE)
+}
+
 #' Draw mixed Latin/Japanese labels with separate fonts
 draw_mixed_label <- function(label, x_npc, y_npc, rot = 0,
                              fontsize = 80,
-                             font_families = get_game_table_fonts()) {
+                             font_families = get_game_table_fonts(),
+                             text_color = "black",
+                             hjust = 0.5,
+                             vjust = 0.5) {
   font_families <- normalize_font_families(font_families)
 
   # Rotated labels: draw as one string (split Latin/Japanese breaks order)
@@ -126,10 +180,11 @@ draw_mixed_label <- function(label, x_npc, y_npc, rot = 0,
               y = unit(y_npc, "npc"),
               rot = rot,
               hjust = 0.5,
-              vjust = 0.5,
+              vjust = vjust,
               gp = gpar(fontsize = fontsize,
                         fontface = "plain",
-                        fontfamily = font_families$japanese))
+                        fontfamily = font_families$japanese,
+                        col = text_color))
     return(invisible(NULL))
   }
 
@@ -140,9 +195,12 @@ draw_mixed_label <- function(label, x_npc, y_npc, rot = 0,
               x = unit(x_npc, "npc"),
               y = unit(y_npc, "npc"),
               rot = rot,
+              hjust = hjust,
+              vjust = vjust,
               gp = gpar(fontsize = fontsize,
                         fontface = "plain",
-                        fontfamily = font_families$latin))
+                        fontfamily = font_families$latin,
+                        col = text_color))
     return(invisible(NULL))
   }
 
@@ -151,21 +209,26 @@ draw_mixed_label <- function(label, x_npc, y_npc, rot = 0,
               x = unit(x_npc, "npc"),
               y = unit(y_npc, "npc"),
               rot = rot,
+              hjust = hjust,
+              vjust = vjust,
               gp = gpar(fontsize = fontsize,
                         fontface = "plain",
-                        fontfamily = font_families$japanese))
+                        fontfamily = font_families$japanese,
+                        col = text_color))
     return(invisible(NULL))
   }
 
   latin_grob <- textGrob(
     label_parts$latin,
     gp = gpar(fontsize = fontsize,
-              fontfamily = font_families$latin)
+              fontfamily = font_families$latin,
+              col = text_color)
   )
   japanese_grob <- textGrob(
     label_parts$japanese,
     gp = gpar(fontsize = fontsize,
-              fontfamily = font_families$japanese)
+              fontfamily = font_families$japanese,
+              col = text_color)
   )
   latin_width <- convertWidth(grobWidth(latin_grob), "npc",
                               valueOnly = TRUE)
@@ -179,6 +242,16 @@ draw_mixed_label <- function(label, x_npc, y_npc, rot = 0,
     latin_y <- y_npc - total_width / 2 + latin_width / 2
     japanese_y <- y_npc - total_width / 2 + latin_width +
       japanese_width / 2
+  } else if (hjust >= 0.99) {
+    latin_x <- x_npc - total_width + latin_width / 2
+    japanese_x <- x_npc - japanese_width / 2
+    latin_y <- y_npc
+    japanese_y <- y_npc
+  } else if (hjust <= 0.01) {
+    latin_x <- x_npc + latin_width / 2
+    japanese_x <- x_npc + latin_width + japanese_width / 2
+    latin_y <- y_npc
+    japanese_y <- y_npc
   } else {
     latin_x <- x_npc - total_width / 2 + latin_width / 2
     japanese_x <- x_npc - total_width / 2 + latin_width +
@@ -191,16 +264,22 @@ draw_mixed_label <- function(label, x_npc, y_npc, rot = 0,
             x = unit(latin_x, "npc"),
             y = unit(latin_y, "npc"),
             rot = rot,
+            hjust = 0.5,
+            vjust = vjust,
             gp = gpar(fontsize = fontsize,
                       fontface = "plain",
-                      fontfamily = font_families$latin))
+                      fontfamily = font_families$latin,
+                      col = text_color))
   grid.text(label_parts$japanese,
             x = unit(japanese_x, "npc"),
             y = unit(japanese_y, "npc"),
             rot = rot,
+            hjust = 0.5,
+            vjust = vjust,
             gp = gpar(fontsize = fontsize,
                       fontface = "plain",
-                      fontfamily = font_families$japanese))
+                      fontfamily = font_families$japanese,
+                      col = text_color))
 
   invisible(NULL)
 }
@@ -236,6 +315,8 @@ get_repo_output_dir <- function(...) {
 #' @param font_families Latin and Japanese font families
 #' @param strategies Strategy names for both players
 #' @param payoff_matrix Payoff matrix in list format
+#' @param cell_annotations_enabled Whether to draw cell marks and footnotes
+#' @param cell_annotations Per-cell annotation specs (see GAME_CELL_ANNOTATIONS)
 #' @param enabled Whether this game is active
 #' @return Game definition list
 define_game <- function(output_dir = NULL,
@@ -245,6 +326,8 @@ define_game <- function(output_dir = NULL,
                         font_families = GAME_FONT_FAMILIES,
                         strategies = GAME_STRATEGIES,
                         payoff_matrix = GAME_PAYOFF_MATRIX,
+                        cell_annotations_enabled = GAME_CELL_ANNOTATIONS_ENABLED,
+                        cell_annotations = GAME_CELL_ANNOTATIONS,
                         enabled = GAME_ENABLED) {
   if (is.null(output_dir)) {
     output_dir <- if (is.null(GAME_OUTPUT_DIR)) {
@@ -263,7 +346,13 @@ define_game <- function(output_dir = NULL,
     calculate_nash = calculate_nash,
     player_labels = player_labels,
     font_families = font_families,
-    payoff_matrix = if (enabled) payoff_matrix else list()
+    payoff_matrix = if (enabled) payoff_matrix else list(),
+    cell_annotations_enabled = enabled && isTRUE(cell_annotations_enabled),
+    cell_annotations = if (enabled && isTRUE(cell_annotations_enabled)) {
+      cell_annotations
+    } else {
+      NULL
+    }
   )
   return(game_definition)
 }
@@ -368,6 +457,256 @@ create_display_dataframe <- function(game_data) {
   display_data
 }
 
+MAX_CELL_ANNOTATIONS <- 99L
+ANNOTATION_MARK_SYMBOL <- "\u203b"  # ※
+
+#' In-cell / footnote mark: ※ when alone, ※1 ※2 … when multiple
+annotation_mark_label <- function(number, show_number = TRUE) {
+  if (!show_number) {
+    return(ANNOTATION_MARK_SYMBOL)
+  }
+  paste0(ANNOTATION_MARK_SYMBOL, as.integer(number))
+}
+
+#' Parse row/col indices from one annotation spec
+parse_annotation_cells <- function(spec) {
+  if (!is.null(spec$cells)) {
+    rows <- cols <- integer()
+    for (cell in spec$cells) {
+      cell <- as.integer(unlist(cell))
+      if (length(cell) != 2) {
+        stop("Each cells entry must be c(row, col)")
+      }
+      rows <- c(rows, cell[1])
+      cols <- c(cols, cell[2])
+    }
+    return(list(rows = rows, cols = cols))
+  }
+
+  if (!is.null(spec$row) && !is.null(spec$col)) {
+    return(list(
+      rows = as.integer(spec$row),
+      cols = as.integer(spec$col)
+    ))
+  }
+
+  stop(
+    "Each annotation needs row and col, or cells: ",
+    "text = \"", spec$text, "\""
+  )
+}
+
+#' Resolve cell annotation specs into marks and footnotes
+#'
+#' @param annotations List of annotation specs (see GAME_CELL_ANNOTATIONS)
+#' @param game_data Game data from create_game_data()
+#' @return list(footnotes, cell_marks) for drawing marks and legend below table
+resolve_cell_annotations <- function(annotations, game_data) {
+  empty <- list(footnotes = list(), cell_marks = list())
+  if (is.null(annotations) || length(annotations) == 0) {
+    return(empty)
+  }
+
+  footnotes <- list()
+  text_to_number <- list()
+  cell_marks <- list()
+  cell_mark_by_key <- list()
+  next_number <- 1L
+
+  assign_number_for_text <- function(text, explicit_mark = NULL) {
+    if (!is.null(text_to_number[[text]])) {
+      return(text_to_number[[text]])
+    }
+    number <- explicit_mark
+    if (is.null(number)) {
+      if (next_number > MAX_CELL_ANNOTATIONS) {
+        stop("Too many distinct annotations (max ", MAX_CELL_ANNOTATIONS, ")")
+      }
+      number <- next_number
+      next_number <<- next_number + 1L
+    }
+    text_to_number[[text]] <<- number
+    footnotes[[length(footnotes) + 1]] <<- list(
+      number = number,
+      text = text
+    )
+    number
+  }
+
+  for (spec in annotations) {
+    if (is.null(spec$text) || !nzchar(spec$text)) {
+      next
+    }
+
+    parsed <- parse_annotation_cells(spec)
+    rows <- parsed$rows
+    cols <- parsed$cols
+    if (length(rows) != length(cols)) {
+      stop("row and col must have the same length in annotation: ", spec$text)
+    }
+    if (length(rows) == 0) {
+      next
+    }
+
+    number <- assign_number_for_text(spec$text, spec$mark)
+
+    for (k in seq_along(rows)) {
+      i <- rows[k]
+      j <- cols[k]
+      if (i < 1 || i > game_data$num_strategies_a ||
+          j < 1 || j > game_data$num_strategies_b) {
+        stop("Annotation row/col out of range: (", i, ", ", j, ")")
+      }
+
+      cell_key <- paste(i, j, sep = ",")
+      if (!is.null(cell_mark_by_key[[cell_key]])) {
+        if (cell_mark_by_key[[cell_key]] != number) {
+          stop(
+            "Cell (", i, ", ", j, ") already has comment ",
+            cell_mark_by_key[[cell_key]], "; cannot also assign ", number
+          )
+        }
+        next
+      }
+      cell_mark_by_key[[cell_key]] <- number
+
+      cell_marks[[length(cell_marks) + 1]] <- list(
+        row = i,
+        col = j,
+        number = number
+      )
+    }
+  }
+
+  show_numbers <- length(footnotes) > 1L
+  for (idx in seq_along(footnotes)) {
+    n <- footnotes[[idx]]$number
+    label <- annotation_mark_label(n, show_numbers)
+    footnotes[[idx]]$footnote_mark <- label
+    footnotes[[idx]]$cell_mark <- label
+  }
+  for (idx in seq_along(cell_marks)) {
+    n <- cell_marks[[idx]]$number
+    cell_marks[[idx]]$mark <- annotation_mark_label(n, show_numbers)
+    cell_marks[[idx]]$number <- NULL
+  }
+
+  list(footnotes = footnotes, cell_marks = cell_marks)
+}
+
+#' Payoff-area geometry in image pixels (strategy column / header row ratios)
+payoff_cell_geometry <- function(game_data, img_width, img_height,
+                                 strategy_col_ratio = 0.25,
+                                 header_row_ratio = 0.25) {
+  payoff_width <- (1 - strategy_col_ratio) * img_width
+  payoff_height <- (1 - header_row_ratio) * img_height
+  list(
+    cell_width = payoff_width / game_data$num_strategies_b,
+    cell_height = payoff_height / game_data$num_strategies_a,
+    payoff_left = strategy_col_ratio * img_width,
+    payoff_top = header_row_ratio * img_height
+  )
+}
+
+#' Convert image y (from top) to grid npc (origin at bottom)
+image_y_top_to_npc <- function(py, img_height, margin_bottom, new_height) {
+  (margin_bottom + img_height - py) / new_height
+}
+
+#' Draw mark symbols on annotated payoff cells
+draw_cell_marks <- function(cell_marks, game_data, img_width, img_height,
+                            margin_left, margin_bottom, new_width, new_height,
+                            strategy_col_ratio = 0.25,
+                            header_row_ratio = 0.25,
+                            font_families = get_game_table_fonts()) {
+  if (length(cell_marks) == 0) {
+    return(invisible(NULL))
+  }
+
+  font_families <- normalize_font_families(font_families)
+  geom <- payoff_cell_geometry(
+    game_data, img_width, img_height,
+    strategy_col_ratio, header_row_ratio
+  )
+  mark_fontsize <- max(36, min(54, round(geom$cell_height * 300 / 20)))
+
+  for (entry in cell_marks) {
+    i <- entry$row
+    j <- entry$col
+    cell_left <- geom$payoff_left + (j - 1) * geom$cell_width
+    cell_right <- cell_left + geom$cell_width
+    cell_top <- geom$payoff_top + (i - 1) * geom$cell_height
+    # Slightly less inset for inner columns (PNG grid vs. flextable is a bit off)
+    inset_x_frac <- if (j == game_data$num_strategies_b) 0.11 else 0.07
+    px <- cell_right - geom$cell_width * inset_x_frac
+    py <- cell_top + geom$cell_height * 0.14
+    x_npc <- (margin_left + px) / new_width
+    y_npc <- image_y_top_to_npc(py, img_height, margin_bottom, new_height)
+
+    draw_mixed_label(
+      entry$mark,
+      x_npc = x_npc,
+      y_npc = y_npc,
+      fontsize = mark_fontsize,
+      font_families = font_families,
+      text_color = "#333333",
+      hjust = 1,
+      vjust = 1
+    )
+  }
+
+  invisible(NULL)
+}
+
+#' Draw footnote lines directly below the payoff table
+draw_annotation_footnotes <- function(footnotes, img_width, img_height,
+                                     margin_left, margin_bottom, new_width,
+                                     new_height,
+                                     font_families = get_game_table_fonts(),
+                                     footnote_fontsize = NULL) {
+  if (length(footnotes) == 0) {
+    return(invisible(NULL))
+  }
+
+  font_families <- normalize_font_families(font_families)
+  if (is.null(footnote_fontsize)) {
+    footnote_fontsize <- max(42, min(56, round(img_width * 300 / 1200)))
+  }
+  line_spacing <- footnote_fontsize * 1.5
+  table_bottom_py <- img_height
+  x_right <- (margin_left + img_width * 0.98) / new_width
+
+  footnote_lines <- vapply(
+    footnotes,
+    function(note) paste0(note$footnote_mark, " ", note$text),
+    character(1)
+  )
+  line_widths <- vapply(
+    footnote_lines,
+    measure_mixed_label_width_npc,
+    numeric(1),
+    fontsize = footnote_fontsize,
+    font_families = font_families
+  )
+  x_start <- x_right - max(line_widths)
+
+  for (idx in seq_along(footnotes)) {
+    py <- table_bottom_py + 36 + (idx - 0.5) * line_spacing
+    y_npc <- image_y_top_to_npc(py, img_height, margin_bottom, new_height)
+    draw_mixed_label(
+      footnote_lines[idx],
+      x_npc = x_start,
+      y_npc = y_npc,
+      fontsize = footnote_fontsize,
+      font_families = font_families,
+      text_color = "#333333",
+      hjust = 0
+    )
+  }
+
+  invisible(NULL)
+}
+
 #' Create and customize flextable for game matrix
 create_game_table <- function(display_data, nash_equilibria,
                               style_options = list(),
@@ -450,17 +789,33 @@ create_game_table <- function(display_data, nash_equilibria,
 #' @param add_player_labels Whether to add player labels
 #' @param player_labels Player label text for top and left positions (from define_game() or analyze_game())
 #' @param label_font_families Latin and Japanese font families for labels
+#' @param annotation_data Resolved annotations from resolve_cell_annotations()
+#' @param game_data Game data for annotation layout (required if annotations present)
 save_game_table <- function(ft, output_path, zoom = 3,
                             resolution = 2000,
                             add_player_labels = TRUE,
                             player_labels,
-                            label_font_families = get_game_table_fonts()) {
+                            label_font_families = get_game_table_fonts(),
+                            annotation_data = NULL,
+                            game_data = NULL) {
   # Layout constants (scale margins with label size to avoid clipping)
   label_font_size <- 80
   margin_top <- max(360, round(label_font_size * 6.5))
   margin_left <- max(440, round(label_font_size * 5.5))
   label_font_families <- normalize_font_families(label_font_families)
   png_type <- if (isTRUE(capabilities("cairo"))) "cairo" else "default"
+
+  if (is.null(annotation_data)) {
+    annotation_data <- list(footnotes = list(), cell_marks = list())
+  }
+  has_annotations <- length(annotation_data$cell_marks) > 0 ||
+    length(annotation_data$footnotes) > 0
+  footnote_count <- length(annotation_data$footnotes)
+  margin_bottom <- if (footnote_count > 0) {
+    max(200, round(footnote_count * 88 + 120))
+  } else {
+    0
+  }
 
   # Table structure ratios
   strategy_col_ratio <- 0.25
@@ -480,7 +835,7 @@ save_game_table <- function(ft, output_path, zoom = 3,
     save_as_image(ft, path = temp_path, webshot = "webshot2",
                   zoom = zoom, res = resolution)
 
-    if (add_player_labels) {
+    if (add_player_labels || has_annotations) {
       # Read image
       img <- readPNG(temp_path)
       img_height <- nrow(img)
@@ -488,44 +843,76 @@ save_game_table <- function(ft, output_path, zoom = 3,
 
       # New image size with margins
       new_width <- img_width + margin_left
-      new_height <- img_height + margin_top
+      new_height <- img_height + margin_top + margin_bottom
 
       # Open PNG device and prepare canvas
       png(output_path, width = new_width,
           height = new_height, res = 300, type = png_type)
       grid.newpage()
 
-      # Column / top player (2)
-      payoff_area_center <- strategy_col_ratio +
-        (1 - strategy_col_ratio) / 2
-      col_player_x_npc <- (margin_left +
-                             img_width * payoff_area_center) / new_width
-      col_player_y_npc <- (img_height + margin_top * 0.32) / new_height
-      draw_mixed_label(player_labels$top,
-                       x_npc = col_player_x_npc,
-                       y_npc = col_player_y_npc,
-                       fontsize = label_font_size,
-                       font_families = label_font_families)
+      if (add_player_labels) {
+        # Column / top player (2)
+        payoff_area_center <- strategy_col_ratio +
+          (1 - strategy_col_ratio) / 2
+        col_player_x_npc <- (margin_left +
+                               img_width * payoff_area_center) / new_width
+        col_player_y_npc <- (margin_bottom + img_height +
+                               margin_top * 0.32) / new_height
+        draw_mixed_label(player_labels$top,
+                         x_npc = col_player_x_npc,
+                         y_npc = col_player_y_npc,
+                         fontsize = label_font_size,
+                         font_families = label_font_families)
 
-      # Row / left player (1)
-      row_player_x_npc <- (margin_left * 0.5) / new_width
-      row_player_y_npc <- (img_height / 2) / new_height
-      draw_mixed_label(player_labels$left,
-                       x_npc = row_player_x_npc,
-                       y_npc = row_player_y_npc,
-                       rot = 90,
-                       fontsize = label_font_size,
-                       font_families = label_font_families)
+        # Row / left player (1)
+        row_player_x_npc <- (margin_left * 0.5) / new_width
+        row_player_y_npc <- (margin_bottom + img_height / 2) / new_height
+        draw_mixed_label(player_labels$left,
+                         x_npc = row_player_x_npc,
+                         y_npc = row_player_y_npc,
+                         rot = 90,
+                         fontsize = label_font_size,
+                         font_families = label_font_families)
+      }
 
       # Place table image
       img_center_x_npc <- (margin_left + img_width / 2) / new_width
-      img_center_y_npc <- (img_height / 2) / new_height
+      img_center_y_npc <- (margin_bottom + img_height / 2) / new_height
       grid.raster(img,
                   x = unit(img_center_x_npc, "npc"),
                   y = unit(img_center_y_npc, "npc"),
                   width = unit(img_width / new_width, "npc"),
                   height = unit(img_height / new_height, "npc"),
                   interpolate = TRUE)
+
+      if (has_annotations) {
+        if (is.null(game_data)) {
+          stop("game_data is required when annotations are present")
+        }
+        draw_cell_marks(
+          annotation_data$cell_marks,
+          game_data = game_data,
+          img_width = img_width,
+          img_height = img_height,
+          margin_left = margin_left,
+          margin_bottom = margin_bottom,
+          new_width = new_width,
+          new_height = new_height,
+          strategy_col_ratio = strategy_col_ratio,
+          header_row_ratio = header_row_ratio,
+          font_families = label_font_families
+        )
+        draw_annotation_footnotes(
+          annotation_data$footnotes,
+          img_width = img_width,
+          img_height = img_height,
+          margin_left = margin_left,
+          margin_bottom = margin_bottom,
+          new_width = new_width,
+          new_height = new_height,
+          font_families = label_font_families
+        )
+      }
 
       dev.off()
       unlink(temp_path)
@@ -597,6 +984,11 @@ analyze_game <- function(game_def,
   # Create display dataframe
   display_data <- create_display_dataframe(game_data)
 
+  annotation_data <- resolve_cell_annotations(
+    game_def$cell_annotations,
+    game_data
+  )
+
   # Create flextables
   ft_without_nash <- create_game_table(display_data, nash_equilibria,
                                        high_quality_style,
@@ -621,7 +1013,9 @@ analyze_game <- function(game_def,
                     file.path(output_dir, filename_without_nash),
                     zoom = zoom, resolution = resolution,
                     player_labels = player_labels,
-                    label_font_families = font_families)
+                    label_font_families = font_families,
+                    annotation_data = annotation_data,
+                    game_data = game_data)
 
     # Save Nash equilibrium version only if calculated
     if (calculate_nash) {
@@ -629,7 +1023,9 @@ analyze_game <- function(game_def,
                       file.path(output_dir, filename_with_nash),
                       zoom = zoom, resolution = resolution,
                       player_labels = player_labels,
-                      label_font_families = font_families)
+                      label_font_families = font_families,
+                      annotation_data = annotation_data,
+                      game_data = game_data)
     }
 
     cat("Images saved to:", output_dir, "\n")
@@ -673,6 +1069,12 @@ if (mini_nash_game$enabled) {
       mini_nash_game$player_labels$left, "\n")
   nash_status <- if (mini_nash_game$calculate_nash) "enabled" else "disabled"
   cat("Nash equilibrium:", nash_status, "\n")
+  annotation_status <- if (isTRUE(mini_nash_game$cell_annotations_enabled)) {
+    "enabled"
+  } else {
+    "disabled"
+  }
+  cat("Cell annotations:", annotation_status, "\n")
 
   # Run game analysis
   cat("\nRunning analysis...\n")
