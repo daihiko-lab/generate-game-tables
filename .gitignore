@@ -11,5 +11,5 @@
 # OS
 .DS_Store
 
-# 生成PNG (必要ならコメントアウトしてコミット)
+# 生成PNG
 output/**/*.png
