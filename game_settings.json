@@ -1,27 +1,27 @@
 {
   "enabled": true,
-  "file_prefix": "3strategies",
+  "file_prefix": "three-strategies_default",
   "calculate_nash": true,
   "save_images": true,
   "player_labels": {
-    "left": "個人1",
-    "top": "個人2"
+    "left": "Player 1",
+    "top": "Player 2"
   },
-  "strategies": ["40%を要求", "50%を要求", "60%を要求"],
+  "strategies": ["Low", "Med", "High"],
   "payoff_matrix": [
-    [40, 40], [40, 50], [40, 60],
-    [50, 40], [50, 50], [0, 0],
-    [60, 40], [0, 0], [0, 0]
+    [4, 4], [4, 5], [4, 6],
+    [5, 4], [5, 5], [0, 0],
+    [6, 4], [0, 0], [0, 0]
   ],
-  "cell_annotations_enabled": true,
+  "cell_annotations_enabled": false,
   "cell_annotations": [
     {
       "cells": [[2, 2]],
-      "text": "無駄なく、平等に分割"
+      "text": "Split equally with no waste"
     },
     {
       "cells": [[3, 1], [1, 3]],
-      "text": "無駄はないが、不平等な分割"
+      "text": "No waste, but unequal split"
     }
   ],
   "output_dir": null,

@@ -10,11 +10,11 @@
 
 **通常版**
 
-![利得表 (通常版)](docs/samples/3strategies.png)
+![利得表 (通常版)](docs/samples/three-strategies_custom.png)
 
 **Nash均衡ハイライト付き**
 
-![利得表 (Nash均衡ハイライト付き)](docs/samples/3strategies_with_nash.png)
+![利得表 (Nash均衡ハイライト付き)](docs/samples/three-strategies_custom_with_nash.png)
 
 ## Nash均衡のハイライトについて
 
