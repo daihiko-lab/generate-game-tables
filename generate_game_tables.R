@@ -2,50 +2,10 @@
 
 # Game Theory Table Generator using R flextable + webshot2
 # Usage: Rscript generate_game_tables.R
-# To customize the game and output, edit GAME SETTINGS below.
+# To customize the game and output, edit game_settings.json.
 
-# -----------------------------------------------------------------------------
-# GAME SETTINGS (edit here)
-# -----------------------------------------------------------------------------
-GAME_ENABLED <- TRUE
-GAME_FILE_PREFIX <- "3strategies"
-GAME_CALCULATE_NASH <- TRUE
-GAME_SAVE_IMAGES <- TRUE
-# top = column player (2), left = row player (1)
-GAME_PLAYER_LABELS <- list(
-  left = "個人1",
-  top = "個人2"
-)
-GAME_STRATEGIES <- c("40%を要求", "50%を要求", "60%を要求")
-# Payoff matrix (row-major): rows = left / player 1, cols = top / player 2;
-# each cell is c(row payoff, col payoff) = c(player 1, player 2)
-GAME_PAYOFF_MATRIX <- list(
-  c(40, 40), c(40, 50), c(40, 60),
-  c(50, 40), c(50, 50), c(0, 0),
-  c(60, 40), c(0, 0), c(0, 0)
-)
-# Cell annotations (※ marks + footnotes below the table)
-GAME_CELL_ANNOTATIONS_ENABLED <- TRUE
-# Cell marks + footnotes (ignored when GAME_CELL_ANNOTATIONS_ENABLED is FALSE).
-# One list entry = one footnote line; mark the cell(s) you name explicitly.
-#   text  (required) explanation below the table
-#   row, col  (required unless cells is set) 1-based: row = left player, col = top
-#   cells  (optional) list of c(row, col) to attach the same footnote to several cells
-#   mark  (optional) comment index; auto 1, 2, 3, … if omitted
-# One distinct note → ※ only (no number); two or more → ※1, ※2, …
-# Same text in multiple entries reuses one mark and one footnote line.
-# Different text → new line under the table (e.g. "※ 交渉失敗" or "※1 …"), right-aligned
-# with ※n starting at the same column (aligned to the longest line).
-GAME_CELL_ANNOTATIONS <- list(
-  list(cells = list(c(2, 2)), text = "無駄なく、平等に分割"),
-  list(cells = list(c(3, 1), c(1, 3)), text = "無駄はないが、不平等な分割")
-  # list(row = 2, col = 3, text = "交渉失敗"),
-  # list(row = 1, col = 1, text = "別の解説")
-)
-# NULL = write to output/ next to this script
-GAME_OUTPUT_DIR <- NULL
-# NULL = Times New Roman + system Japanese font
-GAME_FONT_FAMILIES <- NULL
+# Default JSON settings path. Override with --settings-json=/path/to/file.json.
+DEFAULT_SETTINGS_JSON <- "game_settings.json"
 
 # Check and install required packages
 #' Check if a package is installed and install if necessary
@@ -72,7 +32,8 @@ check_and_install_package <- function(package_name, auto_install = FALSE) {
 
 # Required packages
 required_packages <- c("flextable", "webshot2", "magrittr",
-                       "officer", "grid", "gridExtra", "png")
+                       "officer", "grid", "gridExtra", "png",
+                       "jsonlite")
 
 cat("Checking package dependencies...\n")
 for (pkg in required_packages) {
@@ -306,10 +267,94 @@ get_repo_output_dir <- function(...) {
   file.path(repo_root, "output", ...)
 }
 
+#' Parse --settings-json=/path/to/file.json from CLI args
+parse_settings_json_path <- function(default_path = NULL) {
+  args <- commandArgs(trailingOnly = TRUE)
+  key <- "--settings-json="
+  matches <- startsWith(args, key)
+  if (any(matches)) {
+    return(sub(key, "", args[which(matches)[1]]))
+  }
+  default_path
+}
+
+#' Convert JSON payoff matrix into list(c(a, b), ...)
+normalize_payoff_matrix <- function(value) {
+  if (!is.list(value)) {
+    stop("settings JSON: payoff_matrix must be an array of [a, b] pairs")
+  }
+  lapply(value, function(cell) {
+    nums <- as.numeric(unlist(cell))
+    if (length(nums) != 2 || any(is.na(nums))) {
+      stop("settings JSON: each payoff_matrix cell must contain two numbers")
+    }
+    nums
+  })
+}
+
+#' Load and normalize game settings overrides from JSON
+load_settings_from_json <- function(path) {
+  if (is.null(path) || identical(path, "")) {
+    stop("settings JSON is required. Use --settings-json=...")
+  }
+  if (!file.exists(path)) {
+    stop("settings JSON not found: ", path)
+  }
+
+  raw <- jsonlite::fromJSON(path, simplifyVector = FALSE)
+  if (!is.list(raw)) {
+    stop("settings JSON must be an object")
+  }
+
+  normalized <- raw
+  if (!is.null(normalized$payoff_matrix)) {
+    normalized$payoff_matrix <- normalize_payoff_matrix(normalized$payoff_matrix)
+  }
+  if (!is.null(normalized$strategies)) {
+    normalized$strategies <- as.character(unlist(normalized$strategies))
+  }
+
+  allowed_keys <- c(
+    "enabled", "file_prefix", "calculate_nash", "save_images",
+    "player_labels", "strategies", "payoff_matrix",
+    "cell_annotations_enabled", "cell_annotations",
+    "output_dir", "font_families"
+  )
+  unknown_keys <- setdiff(names(normalized), allowed_keys)
+  if (length(unknown_keys) > 0) {
+    warning("settings JSON: ignored unknown keys: ",
+            paste(unknown_keys, collapse = ", "))
+    normalized[unknown_keys] <- NULL
+  }
+
+  normalized
+}
+
+#' Load required game settings from JSON
+resolve_game_settings <- function() {
+  settings_path <- parse_settings_json_path(default_path = DEFAULT_SETTINGS_JSON)
+  settings <- load_settings_from_json(settings_path)
+
+  required_keys <- c(
+    "enabled", "file_prefix", "calculate_nash", "save_images",
+    "player_labels", "strategies", "payoff_matrix",
+    "cell_annotations_enabled", "cell_annotations",
+    "output_dir", "font_families"
+  )
+  missing_keys <- setdiff(required_keys, names(settings))
+  if (length(missing_keys) > 0) {
+    stop("settings JSON is missing required keys: ",
+         paste(missing_keys, collapse = ", "))
+  }
+
+  settings$settings_json <- settings_path
+  settings
+}
+
 # Game definition
 #' Define game parameters
 #'
-#' @param output_dir Output directory (NULL uses GAME_OUTPUT_DIR or repo output/)
+#' @param output_dir Output directory (NULL uses repo output/)
 #' @param file_prefix File name prefix
 #' @param calculate_nash Whether to calculate Nash equilibrium
 #' @param player_labels Player labels for top and left positions
@@ -317,25 +362,21 @@ get_repo_output_dir <- function(...) {
 #' @param strategies Strategy names for both players
 #' @param payoff_matrix Payoff matrix in list format
 #' @param cell_annotations_enabled Whether to draw cell marks and footnotes
-#' @param cell_annotations Per-cell annotation specs (see GAME_CELL_ANNOTATIONS)
+#' @param cell_annotations Per-cell annotation specs
 #' @param enabled Whether this game is active
 #' @return Game definition list
-define_game <- function(output_dir = NULL,
-                        file_prefix = GAME_FILE_PREFIX,
-                        calculate_nash = GAME_CALCULATE_NASH,
-                        player_labels = GAME_PLAYER_LABELS,
-                        font_families = GAME_FONT_FAMILIES,
-                        strategies = GAME_STRATEGIES,
-                        payoff_matrix = GAME_PAYOFF_MATRIX,
-                        cell_annotations_enabled = GAME_CELL_ANNOTATIONS_ENABLED,
-                        cell_annotations = GAME_CELL_ANNOTATIONS,
-                        enabled = GAME_ENABLED) {
+define_game <- function(file_prefix,
+                        calculate_nash,
+                        player_labels,
+                        strategies,
+                        payoff_matrix,
+                        cell_annotations_enabled,
+                        cell_annotations,
+                        enabled,
+                        output_dir = NULL,
+                        font_families = NULL) {
   if (is.null(output_dir)) {
-    output_dir <- if (is.null(GAME_OUTPUT_DIR)) {
-      get_repo_output_dir()
-    } else {
-      GAME_OUTPUT_DIR
-    }
+    output_dir <- get_repo_output_dir()
   }
   font_families <- normalize_font_families(font_families)
 
@@ -500,7 +541,7 @@ parse_annotation_cells <- function(spec) {
 
 #' Resolve cell annotation specs into marks and footnotes
 #'
-#' @param annotations List of annotation specs (see GAME_CELL_ANNOTATIONS)
+#' @param annotations List of annotation specs from settings JSON
 #' @param game_data Game data from create_game_data()
 #' @return list(footnotes, cell_marks) for drawing marks and legend below table
 resolve_cell_annotations <- function(annotations, game_data) {
@@ -752,6 +793,7 @@ create_game_table <- function(display_data, nash_equilibria,
     latin_font_family = default_fonts$latin,
     japanese_font_family = default_fonts$japanese,
     padding = 8,
+    width_scale = 1.25,
     bg_color = "white",
     highlight_color = "lightgray",
     border_color = "black",
@@ -794,8 +836,8 @@ create_game_table <- function(display_data, nash_equilibria,
   # Width calculation in inches, accounting for font size and padding
   char_width_inch <- 0.08
   padding_inch <- style$padding / 72
-  cell_width <- max_chars * char_width_inch * style$font_size / 10.5 +
-    2 * padding_inch
+  cell_width <- (max_chars * char_width_inch * style$font_size / 10.5 +
+    2 * padding_inch) * style$width_scale
 
   # Apply uniform width to all columns
   num_cols <- ncol(display_data)
@@ -832,10 +874,10 @@ save_game_table <- function(ft, output_path, zoom = 3,
                             label_font_families = get_game_table_fonts(),
                             annotation_data = NULL,
                             game_data = NULL) {
-  # Layout constants (scale margins with label size to avoid clipping)
-  label_font_size <- 80
-  margin_top <- max(360, round(label_font_size * 6.5))
-  margin_left <- max(440, round(label_font_size * 5.5))
+  # Layout defaults (computed from rendered image size later when labels are used)
+  label_font_size <- 64
+  margin_top <- 0
+  margin_left <- 0
   label_font_families <- normalize_font_families(label_font_families)
   png_type <- if (isTRUE(capabilities("cairo"))) "cairo" else "default"
 
@@ -869,6 +911,15 @@ save_game_table <- function(ft, output_path, zoom = 3,
       img <- readPNG(temp_path)
       img_height <- nrow(img)
       img_width <- ncol(img)
+      if (add_player_labels) {
+        base_dim <- min(img_width, img_height)
+        label_font_size <- max(52, min(72, round(base_dim * 0.055)))
+        label_gap_px <- round(label_font_size * 0.9)
+        margin_top <- max(round(img_height * 0.08),
+                          label_gap_px + round(label_font_size * 0.95))
+        margin_left <- max(round(img_width * 0.08),
+                           label_gap_px + round(label_font_size * 1.05))
+      }
 
       margin_bottom <- footnote_margin_bottom_px(footnote_count, img_width)
       footnote_fontsize <- if (footnote_count > 0) {
@@ -892,8 +943,9 @@ save_game_table <- function(ft, output_path, zoom = 3,
           (1 - strategy_col_ratio) / 2
         col_player_x_npc <- (margin_left +
                                img_width * payoff_area_center) / new_width
+        top_label_gap_px <- round(label_font_size * 0.9)
         col_player_y_npc <- (margin_bottom + img_height +
-                               margin_top * 0.32) / new_height
+                               top_label_gap_px) / new_height
         draw_mixed_label(player_labels$top,
                          x_npc = col_player_x_npc,
                          y_npc = col_player_y_npc,
@@ -901,7 +953,8 @@ save_game_table <- function(ft, output_path, zoom = 3,
                          font_families = label_font_families)
 
         # Row / left player (1)
-        row_player_x_npc <- (margin_left * 0.5) / new_width
+        left_label_gap_px <- round(label_font_size * 0.9)
+        row_player_x_npc <- (margin_left - left_label_gap_px) / new_width
         row_player_y_npc <- (margin_bottom + img_height / 2) / new_height
         draw_mixed_label(player_labels$left,
                          x_npc = row_player_x_npc,
@@ -1087,10 +1140,26 @@ analyze_game <- function(game_def,
 # Main execution
 cat("Game Theory Table Generator\n")
 
-save_images <- GAME_SAVE_IMAGES
+resolved_settings <- resolve_game_settings()
+if (!is.null(resolved_settings$settings_json) &&
+    !identical(resolved_settings$settings_json, "")) {
+  cat("Loaded settings JSON:", resolved_settings$settings_json, "\n")
+}
+save_images <- resolved_settings$save_images
 
 # Load game definition
-mini_nash_game <- define_game()
+mini_nash_game <- define_game(
+  output_dir = resolved_settings$output_dir,
+  file_prefix = resolved_settings$file_prefix,
+  calculate_nash = resolved_settings$calculate_nash,
+  player_labels = resolved_settings$player_labels,
+  font_families = resolved_settings$font_families,
+  strategies = resolved_settings$strategies,
+  payoff_matrix = resolved_settings$payoff_matrix,
+  cell_annotations_enabled = resolved_settings$cell_annotations_enabled,
+  cell_annotations = resolved_settings$cell_annotations,
+  enabled = resolved_settings$enabled
+)
 
 # Execute game processing
 if (mini_nash_game$enabled) {
@@ -1162,5 +1231,5 @@ if (mini_nash_game$enabled) {
 } else {
   cat("\nGame processing skipped\n")
   cat("This game is disabled\n")
-  cat("To enable, set GAME_ENABLED <- TRUE at the top of this file\n")
+  cat("To enable, set enabled to true in the settings JSON\n")
 }
