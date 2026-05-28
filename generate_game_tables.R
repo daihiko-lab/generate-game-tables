@@ -318,6 +318,7 @@ load_settings_from_json <- function(path) {
     "enabled", "file_prefix", "calculate_nash", "save_images",
     "player_labels", "strategies", "payoff_matrix",
     "cell_annotations_enabled", "cell_annotations",
+    "cell_colors_enabled", "cell_colors",
     "output_dir", "font_families"
   )
   unknown_keys <- setdiff(names(normalized), allowed_keys)
@@ -334,6 +335,12 @@ load_settings_from_json <- function(path) {
 resolve_game_settings <- function() {
   settings_path <- parse_settings_json_path(default_path = DEFAULT_SETTINGS_JSON)
   settings <- load_settings_from_json(settings_path)
+  if (is.null(settings$cell_colors_enabled)) {
+    settings$cell_colors_enabled <- FALSE
+  }
+  if (is.null(settings$cell_colors)) {
+    settings$cell_colors <- list()
+  }
 
   required_keys <- c(
     "enabled", "file_prefix", "calculate_nash", "save_images",
@@ -364,6 +371,8 @@ resolve_game_settings <- function() {
 #' @param cell_annotations_enabled Whether to draw cell marks and footnotes
 #' @param cell_annotations Per-cell annotation specs
 #' @param enabled Whether this game is active
+#' @param cell_colors_enabled Whether to draw per-cell background colors
+#' @param cell_colors Per-cell color specs
 #' @return Game definition list
 define_game <- function(file_prefix,
                         calculate_nash,
@@ -374,7 +383,9 @@ define_game <- function(file_prefix,
                         cell_annotations,
                         enabled,
                         output_dir = NULL,
-                        font_families = NULL) {
+                        font_families = NULL,
+                        cell_colors_enabled = FALSE,
+                        cell_colors = list()) {
   if (is.null(output_dir)) {
     output_dir <- get_repo_output_dir()
   }
@@ -392,6 +403,12 @@ define_game <- function(file_prefix,
     cell_annotations_enabled = enabled && isTRUE(cell_annotations_enabled),
     cell_annotations = if (enabled && isTRUE(cell_annotations_enabled)) {
       cell_annotations
+    } else {
+      NULL
+    },
+    cell_colors_enabled = enabled && isTRUE(cell_colors_enabled),
+    cell_colors = if (enabled && isTRUE(cell_colors_enabled)) {
+      cell_colors
     } else {
       NULL
     }
@@ -511,14 +528,14 @@ annotation_mark_label <- function(number, show_number = TRUE) {
   paste0(ANNOTATION_MARK_SYMBOL, as.integer(number))
 }
 
-#' Parse row/col indices from one annotation spec
-parse_annotation_cells <- function(spec) {
+#' Parse row/col indices from one per-cell setting spec
+parse_cell_positions <- function(spec, context = "cell setting") {
   if (!is.null(spec$cells)) {
     rows <- cols <- integer()
     for (cell in spec$cells) {
       cell <- as.integer(unlist(cell))
-      if (length(cell) != 2) {
-        stop("Each cells entry must be c(row, col)")
+      if (length(cell) != 2 || any(is.na(cell))) {
+        stop("Each ", context, " cells entry must be c(row, col)")
       }
       rows <- c(rows, cell[1])
       cols <- c(cols, cell[2])
@@ -527,16 +544,20 @@ parse_annotation_cells <- function(spec) {
   }
 
   if (!is.null(spec$row) && !is.null(spec$col)) {
-    return(list(
-      rows = as.integer(spec$row),
-      cols = as.integer(spec$col)
-    ))
+    rows <- as.integer(unlist(spec$row))
+    cols <- as.integer(unlist(spec$col))
+    if (any(is.na(rows)) || any(is.na(cols))) {
+      stop("Each ", context, " row/col must be integers")
+    }
+    return(list(rows = rows, cols = cols))
   }
 
-  stop(
-    "Each annotation needs row and col, or cells: ",
-    "text = \"", spec$text, "\""
-  )
+  stop("Each ", context, " needs row and col, or cells")
+}
+
+#' Parse row/col indices from one annotation spec
+parse_annotation_cells <- function(spec) {
+  parse_cell_positions(spec, context = "annotation")
 }
 
 #' Resolve cell annotation specs into marks and footnotes
@@ -635,6 +656,93 @@ resolve_cell_annotations <- function(annotations, game_data) {
   }
 
   list(footnotes = footnotes, cell_marks = cell_marks)
+}
+
+#' Validate an R/flextable-compatible color value
+validate_color_value <- function(color, context = "cell color") {
+  color <- as.character(unlist(color))
+  if (length(color) != 1 || is.na(color) || !nzchar(color)) {
+    stop(context, " must have a non-empty color")
+  }
+
+  tryCatch(
+    {
+      grDevices::col2rgb(color)
+      color
+    },
+    error = function(e) {
+      stop(context, " has invalid color: ", color, call. = FALSE)
+    }
+  )
+}
+
+#' Resolve cell background color specs
+#'
+#' @param cell_colors List of cell color specs from settings JSON
+#' @param game_data Game data from create_game_data()
+#' @return list(row, col, color) entries for flextable background styling
+resolve_cell_colors <- function(cell_colors, game_data) {
+  if (is.null(cell_colors) || length(cell_colors) == 0) {
+    return(list())
+  }
+
+  resolved <- list()
+  color_by_key <- list()
+
+  for (spec_idx in seq_along(cell_colors)) {
+    spec <- cell_colors[[spec_idx]]
+    color_value <- spec$color
+    if (is.null(color_value)) {
+      color_value <- spec$bg_color
+    }
+    color <- validate_color_value(
+      color_value,
+      context = paste0("cell_colors[[", spec_idx, "]]")
+    )
+
+    parsed <- parse_cell_positions(
+      spec,
+      context = paste0("cell_colors[[", spec_idx, "]]")
+    )
+    rows <- parsed$rows
+    cols <- parsed$cols
+    if (length(rows) != length(cols)) {
+      stop("row and col must have the same length in cell_colors[[",
+           spec_idx, "]]")
+    }
+    if (length(rows) == 0) {
+      next
+    }
+
+    for (k in seq_along(rows)) {
+      i <- rows[k]
+      j <- cols[k]
+      if (i < 1 || i > game_data$num_strategies_a ||
+          j < 1 || j > game_data$num_strategies_b) {
+        stop("Cell color row/col out of range: (", i, ", ", j, ")")
+      }
+
+      cell_key <- paste(i, j, sep = ",")
+      if (!is.null(color_by_key[[cell_key]])) {
+        if (color_by_key[[cell_key]] != color) {
+          stop(
+            "Cell (", i, ", ", j, ") already has color ",
+            color_by_key[[cell_key]], "; cannot also assign ", color
+          )
+        }
+        next
+      }
+      color_by_key[[cell_key]] <- color
+
+      resolved[[length(resolved) + 1]] <- list(
+        row = i,
+        col = j,
+        color = color
+      )
+    }
+  }
+
+  resolved
 }
 
 #' Payoff-area geometry in image pixels (strategy column / header row ratios)
@@ -785,7 +893,8 @@ draw_annotation_footnotes <- function(footnotes, img_width, img_height,
 #' Create and customize flextable for game matrix
 create_game_table <- function(display_data, nash_equilibria,
                               style_options = list(),
-                              highlight_nash = TRUE) {
+                              highlight_nash = TRUE,
+                              cell_colors = list()) {
   # Default style settings
   default_fonts <- get_game_table_fonts()
   default_style <- list(
@@ -851,6 +960,13 @@ create_game_table <- function(display_data, nash_equilibria,
       ft <- ft %>%
         bg(i = row_idx, j = col_idx, bg = style$highlight_color) %>%
         bold(i = row_idx, j = col_idx)
+    }
+  }
+
+  if (length(cell_colors) > 0) {
+    for (entry in cell_colors) {
+      ft <- ft %>%
+        bg(i = entry$row, j = entry$col + 1, bg = entry$color)
     }
   }
 
@@ -954,8 +1070,16 @@ save_game_table <- function(ft, output_path, zoom = 3,
 
         # Row / left player (1)
         left_label_gap_px <- round(label_font_size * 0.9)
+        payoff_row_center_from_top <- header_row_ratio +
+          (1 - header_row_ratio) / 2
+        # Slightly below table center, but not as low as full payoff-area center
+        left_label_vertical_blend <- 0.70
+        left_label_center_from_top <- 0.5 * (1 - left_label_vertical_blend) +
+          payoff_row_center_from_top * left_label_vertical_blend
         row_player_x_npc <- (margin_left - left_label_gap_px) / new_width
-        row_player_y_npc <- (margin_bottom + img_height / 2) / new_height
+        row_player_y_npc <- (margin_bottom +
+                               img_height * (1 - left_label_center_from_top)) /
+          new_height
         draw_mixed_label(player_labels$left,
                          x_npc = row_player_x_npc,
                          y_npc = row_player_y_npc,
@@ -1078,14 +1202,20 @@ analyze_game <- function(game_def,
     game_def$cell_annotations,
     game_data
   )
+  cell_colors <- resolve_cell_colors(
+    game_def$cell_colors,
+    game_data
+  )
 
   # Create flextables
   ft_without_nash <- create_game_table(display_data, nash_equilibria,
                                        high_quality_style,
-                                       highlight_nash = FALSE)
+                                       highlight_nash = FALSE,
+                                       cell_colors = cell_colors)
   ft_with_nash <- create_game_table(display_data, nash_equilibria,
                                     high_quality_style,
-                                    highlight_nash = TRUE)
+                                    highlight_nash = TRUE,
+                                    cell_colors = cell_colors)
 
   # Save images
   if (save_images) {
@@ -1131,6 +1261,7 @@ analyze_game <- function(game_def,
     game_data = game_data,
     nash_equilibria = nash_equilibria,
     display_data = display_data,
+    cell_colors = cell_colors,
     without_nash = ft_without_nash,
     with_nash = if (calculate_nash) ft_with_nash else NULL,
     nash_calculated = calculate_nash
@@ -1158,6 +1289,8 @@ mini_nash_game <- define_game(
   payoff_matrix = resolved_settings$payoff_matrix,
   cell_annotations_enabled = resolved_settings$cell_annotations_enabled,
   cell_annotations = resolved_settings$cell_annotations,
+  cell_colors_enabled = resolved_settings$cell_colors_enabled,
+  cell_colors = resolved_settings$cell_colors,
   enabled = resolved_settings$enabled
 )
 
@@ -1181,6 +1314,12 @@ if (mini_nash_game$enabled) {
     "disabled"
   }
   cat("Cell annotations:", annotation_status, "\n")
+  color_status <- if (isTRUE(mini_nash_game$cell_colors_enabled)) {
+    "enabled"
+  } else {
+    "disabled"
+  }
+  cat("Cell colors:", color_status, "\n")
 
   # Run game analysis
   cat("\nRunning analysis...\n")

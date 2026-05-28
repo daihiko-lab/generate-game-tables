@@ -47,6 +47,32 @@
 }
 ```
 
+## セル色
+
+特定の利得セルだけ背景色を変えられます。`game_settings.json`の`cell_colors_enabled`を`true`にし、`cell_colors`に対象セルと色を書きます。行・列はセル注釈と同じく1始まりです。
+
+- `row`, `col` … 対象セル (1始まり。`row` = 左のプレイヤー、`col` = 上のプレイヤー)
+- `cells` … 同じ色を複数セルに付けるときは`[[row, col], ...]`で指定
+- `color` … 背景色。`"#FFF2CC"`のような16進カラー、または`"lightgray"`のようなRで使える色名
+
+```json
+{
+  "cell_colors_enabled": true,
+  "cell_colors": [
+    {
+      "cells": [[2, 2]],
+      "color": "#FFF2CC"
+    },
+    {
+      "cells": [[3, 1], [1, 3]],
+      "color": "#DDEBF7"
+    }
+  ]
+}
+```
+
+Nash均衡ハイライトと同じセルに指定した場合は、`cell_colors`の色が優先されます。
+
 ## 必要なもの
 
 - R (4.x 系を推奨)
